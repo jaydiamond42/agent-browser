@@ -782,6 +782,9 @@ export class BrowserManager {
       throw new Error('Browser not launched');
     }
 
+    // Invalidate CDP session since we're switching to a new page
+    await this.invalidateCDPSession();
+
     const context = this.contexts[0]; // Use first context for tabs
     const page = await context.newPage();
     this.pages.push(page);
@@ -821,11 +824,33 @@ export class BrowserManager {
   }
 
   /**
+   * Invalidate the current CDP session (must be called before switching pages)
+   * This ensures screencast and input injection work correctly after tab switch
+   */
+  private async invalidateCDPSession(): Promise<void> {
+    // Stop screencast if active (it's tied to the current page's CDP session)
+    if (this.screencastActive) {
+      await this.stopScreencast();
+    }
+
+    // Detach and clear the CDP session
+    if (this.cdpSession) {
+      await this.cdpSession.detach().catch(() => {});
+      this.cdpSession = null;
+    }
+  }
+
+  /**
    * Switch to a specific tab/page by index
    */
-  switchTo(index: number): { index: number; url: string; title: string } {
+  async switchTo(index: number): Promise<{ index: number; url: string; title: string }> {
     if (index < 0 || index >= this.pages.length) {
       throw new Error(`Invalid tab index: ${index}. Available: 0-${this.pages.length - 1}`);
+    }
+
+    // Invalidate CDP session before switching (it's page-specific)
+    if (index !== this.activePageIndex) {
+      await this.invalidateCDPSession();
     }
 
     this.activePageIndex = index;
@@ -850,6 +875,11 @@ export class BrowserManager {
 
     if (this.pages.length === 1) {
       throw new Error('Cannot close the last tab. Use "close" to close the browser.');
+    }
+
+    // If closing the active tab, invalidate CDP session first
+    if (targetIndex === this.activePageIndex) {
+      await this.invalidateCDPSession();
     }
 
     const page = this.pages[targetIndex];

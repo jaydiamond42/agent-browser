@@ -709,7 +709,7 @@ async function handleTabSwitch(
   command: TabSwitchCommand,
   browser: BrowserManager
 ): Promise<Response<TabSwitchData>> {
-  const result = browser.switchTo(command.index);
+  const result = await browser.switchTo(command.index);
   const page = browser.getPage();
   return successResponse(command.id, {
     ...result,
