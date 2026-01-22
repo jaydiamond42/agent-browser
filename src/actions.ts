@@ -1074,11 +1074,9 @@ async function handleDownload(
   browser: BrowserManager
 ): Promise<Response> {
   const page = browser.getPage();
+  const locator = browser.getLocator(command.selector);
 
-  const [download] = await Promise.all([
-    page.waitForEvent('download'),
-    page.click(command.selector),
-  ]);
+  const [download] = await Promise.all([page.waitForEvent('download'), locator.click()]);
 
   await download.saveAs(command.path);
   return successResponse(command.id, {

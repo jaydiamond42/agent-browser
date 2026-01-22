@@ -220,7 +220,22 @@ pub fn print_response(resp: &Response, json_mode: bool) {
             }
             return;
         }
-        // Screenshot path (no "started" or "frames" field)
+        // Download response (has "suggestedFilename" or "filename" field)
+        if data.get("suggestedFilename").is_some() || data.get("filename").is_some() {
+            if let Some(path) = data.get("path").and_then(|v| v.as_str()) {
+                let filename = data.get("suggestedFilename")
+                    .or_else(|| data.get("filename"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if filename.is_empty() {
+                    println!("{} Downloaded to {}", color::success_indicator(), color::green(path));
+                } else {
+                    println!("{} Downloaded to {} ({})", color::success_indicator(), color::green(path), filename);
+                }
+                return;
+            }
+        }
+        // Screenshot path (no "started", "frames", or download fields)
         if let Some(path) = data.get("path").and_then(|v| v.as_str()) {
             println!("{} Screenshot saved to {}", color::success_indicator(), color::green(path));
             return;
@@ -513,6 +528,28 @@ Examples:
   agent-browser upload @e3 ./image1.png ./image2.png
 "##
         }
+        "download" => {
+            r##"
+agent-browser download - Download a file by clicking an element
+
+Usage: agent-browser download <selector> <path>
+
+Clicks an element that triggers a download and saves the file to the specified path.
+
+Arguments:
+  selector             Element to click (CSS selector or @ref)
+  path                 Path where the downloaded file will be saved
+
+Global Options:
+  --json               Output as JSON
+  --session <name>     Use specific session
+
+Examples:
+  agent-browser download "#download-btn" ./file.pdf
+  agent-browser download @e5 ./report.xlsx
+  agent-browser download "a[href$='.zip']" ./archive.zip
+"##
+        }
 
         // === Keyboard ===
         "press" | "key" => {
@@ -642,6 +679,10 @@ Modes:
   --load <state>       Wait for load state (load, domcontentloaded, networkidle)
   --fn <expression>    Wait for JavaScript expression to be truthy
   --text <text>        Wait for text to appear on page
+  --download [path]    Wait for a download to complete (optionally save to path)
+
+Download Options (with --download):
+  --timeout <ms>       Timeout in milliseconds for download to start
 
 Global Options:
   --json               Output as JSON
@@ -654,6 +695,8 @@ Examples:
   agent-browser wait --load networkidle
   agent-browser wait --fn "window.appReady === true"
   agent-browser wait --text "Welcome back"
+  agent-browser wait --download ./file.pdf
+  agent-browser wait --download ./report.xlsx --timeout 30000
 "##
         }
 
@@ -1384,6 +1427,7 @@ Core Commands:
   select <sel> <val...>      Select dropdown option
   drag <src> <dst>           Drag and drop
   upload <sel> <files...>    Upload files
+  download <sel> <path>      Download file by clicking element
   scroll <dir> [px]          Scroll (up/down/left/right)
   scrollintoview <sel>       Scroll element into view
   wait <sel|ms>              Wait for element or time
