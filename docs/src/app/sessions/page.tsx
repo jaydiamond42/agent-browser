@@ -32,6 +32,25 @@ agent-browser session`} />
           <li>Authentication state</li>
         </ul>
 
+        <h2>Persistent profiles</h2>
+        <p>By default, browser state is lost when the browser closes. Use <code>--profile</code> to persist state across restarts:</p>
+        <CodeBlock code={`# Use a persistent profile directory
+agent-browser --profile ~/.myapp-profile open myapp.com
+
+# Login once, then reuse the authenticated session
+agent-browser --profile ~/.myapp-profile open myapp.com/dashboard
+
+# Or via environment variable
+AGENT_BROWSER_PROFILE=~/.myapp-profile agent-browser open myapp.com`} />
+        <p>The profile directory stores:</p>
+        <ul>
+          <li>Cookies and localStorage</li>
+          <li>IndexedDB data</li>
+          <li>Service workers</li>
+          <li>Browser cache</li>
+          <li>Login sessions</li>
+        </ul>
+
         <h2>Authenticated sessions</h2>
         <p>
           Use <code>--headers</code> to set HTTP headers for a specific origin:
