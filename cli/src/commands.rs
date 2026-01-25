@@ -1433,7 +1433,7 @@ mod tests {
         assert_eq!(cmd["cookies"][0]["httpOnly"], true);
         assert_eq!(cmd["cookies"][0]["secure"], true);
         assert_eq!(cmd["cookies"][0]["sameSite"], "None");
-        assert_eq!(cmd["cookies"][0]["expires"], 9999999999);
+        assert_eq!(cmd["cookies"][0]["expires"], 9999999999i64);
     }
 
     #[test]
