@@ -116,6 +116,24 @@ fn get_pid_path(session: &str) -> PathBuf {
     get_socket_dir().join(format!("{}.pid", session))
 }
 
+/// Clean up stale socket and PID files for a session
+fn cleanup_stale_files(session: &str) {
+    let pid_path = get_pid_path(session);
+    let _ = fs::remove_file(&pid_path);
+
+    #[cfg(unix)]
+    {
+        let socket_path = get_socket_path(session);
+        let _ = fs::remove_file(&socket_path);
+    }
+
+    #[cfg(windows)]
+    {
+        let port_path = get_port_path(session);
+        let _ = fs::remove_file(&port_path);
+    }
+}
+
 #[cfg(windows)]
 fn get_port_path(session: &str) -> PathBuf {
     get_socket_dir().join(format!("{}.port", session))
@@ -198,11 +216,21 @@ pub fn ensure_daemon(
     profile: Option<&str>,
     state: Option<&str>,
 ) -> Result<DaemonResult, String> {
+    // Check if daemon is running AND responsive
     if is_daemon_running(session) && daemon_ready(session) {
-        return Ok(DaemonResult {
-            already_running: true,
-        });
+        // Double-check it's actually responsive by waiting and checking again
+        // This handles the race condition where daemon is shutting down
+        // (daemon has a 100ms shutdown delay, so we wait longer)
+        thread::sleep(Duration::from_millis(150));
+        if daemon_ready(session) {
+            return Ok(DaemonResult {
+                already_running: true,
+            });
+        }
     }
+
+    // Clean up any stale socket/pid files before starting fresh
+    cleanup_stale_files(session);
 
     // Ensure socket directory exists
     let socket_dir = get_socket_dir();
@@ -393,12 +421,62 @@ fn connect(session: &str) -> Result<Connection, String> {
 }
 
 pub fn send_command(cmd: Value, session: &str) -> Result<Response, String> {
+    // Retry logic for transient errors (EAGAIN/EWOULDBLOCK/connection issues)
+    const MAX_RETRIES: u32 = 5;
+    const RETRY_DELAY_MS: u64 = 200;
+
+    let mut last_error = String::new();
+
+    for attempt in 0..MAX_RETRIES {
+        if attempt > 0 {
+            thread::sleep(Duration::from_millis(RETRY_DELAY_MS * (attempt as u64)));
+        }
+
+        match send_command_once(&cmd, session) {
+            Ok(response) => return Ok(response),
+            Err(e) => {
+                // Check if this is a transient error worth retrying
+                // - OS error 35 (EAGAIN) on macOS, 11 (EAGAIN) on Linux
+                // - EOF errors (daemon closed connection before responding)
+                // - Connection reset/broken pipe (daemon crashed or restarting)
+                // - Connection refused/socket not found (daemon still starting)
+                let is_transient = e.contains("os error 35")
+                    || e.contains("os error 11")
+                    || e.contains("WouldBlock")
+                    || e.contains("Resource temporarily unavailable")
+                    || e.contains("EOF")
+                    || e.contains("line 1 column 0")
+                    || e.contains("Connection reset")
+                    || e.contains("Broken pipe")
+                    || e.contains("os error 54") // Connection reset by peer (macOS)
+                    || e.contains("os error 104") // Connection reset by peer (Linux)
+                    || e.contains("os error 2") // No such file or directory (socket gone)
+                    || e.contains("os error 61") // Connection refused (macOS)
+                    || e.contains("os error 111"); // Connection refused (Linux)
+
+                if is_transient {
+                    last_error = e;
+                    continue;
+                }
+                // Non-transient error, fail immediately
+                return Err(e);
+            }
+        }
+    }
+
+    Err(format!(
+        "{} (after {} retries - daemon may be busy or unresponsive)",
+        last_error, MAX_RETRIES
+    ))
+}
+
+fn send_command_once(cmd: &Value, session: &str) -> Result<Response, String> {
     let mut stream = connect(session)?;
 
     stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
     stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
 
-    let mut json_str = serde_json::to_string(&cmd).map_err(|e| e.to_string())?;
+    let mut json_str = serde_json::to_string(cmd).map_err(|e| e.to_string())?;
     json_str.push('\n');
 
     stream
