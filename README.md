@@ -756,22 +756,6 @@ await browser.injectKeyboardEvent({
 await browser.stopScreencast();
 ```
 
-## Why agent-browser over playwright-mcp?
-
-| | agent-browser | playwright-mcp |
-|---|---|---|
-| **Output format** | Compact text (200-400 tokens per snapshot) | JSON (3,000-5,000+ tokens per snapshot) |
-| **Element selection** | Ref-based (`@e1`, `@e2`) from accessibility tree snapshots | CSS selectors or coordinate-based |
-| **Protocol** | CLI (works with any agent that can run shell commands) | MCP (requires MCP-compatible client) |
-| **Session management** | Built-in named sessions, profiles, state persistence, encryption | Single browser instance |
-| **Browser control** | 50+ commands covering navigation, forms, network, storage, cookies, tabs | Core navigation and interaction |
-| **Performance** | Native Rust CLI + persistent daemon (sub-millisecond command parsing) | Node.js process per invocation |
-| **Mobile testing** | iOS Simulator support via Appium | Desktop only |
-| **Cloud browsers** | Browserbase, Browser Use, Kernel integrations | None built-in |
-| **Streaming** | WebSocket viewport streaming for live preview | None |
-
-**In short:** agent-browser is designed for AI agents first. Its compact text output uses fewer tokens, refs provide deterministic element selection, and the CLI interface works with any agent framework. playwright-mcp is a good choice if you already use the MCP protocol and need basic browser automation.
-
 ## Architecture
 
 agent-browser uses a client-daemon architecture:
