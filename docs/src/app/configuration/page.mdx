@@ -17,10 +17,11 @@ agent-browser checks two locations, merged in priority order:
 
 Project-level values override user-level values. Environment variables override both. CLI flags always win.
 
-Use `--config <path>` to load a specific config file instead of the default locations:
+Use `--config <path>` or the `AGENT_BROWSER_CONFIG` environment variable to load a specific config file instead of the default locations:
 
 ```bash
 agent-browser --config ./ci-config.json open example.com
+AGENT_BROWSER_CONFIG=./ci-config.json agent-browser open example.com
 ```
 
 ## Example Config

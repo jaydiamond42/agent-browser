@@ -1878,7 +1878,7 @@ Options:
   --cdp <port>               Connect via CDP (Chrome DevTools Protocol)
   --auto-connect             Auto-discover and connect to running Chrome
   --session-name <name>      Auto-save/restore session state (cookies, localStorage)
-  --config <path>            Use a custom config file (instead of default locations)
+  --config <path>            Use a custom config file (or AGENT_BROWSER_CONFIG env)
   --debug                    Debug output
   --version, -V              Show version
 
@@ -1902,14 +1902,21 @@ Configuration:
     {{"headed": true, "proxy": "http://localhost:8080", "profile": "./browser-data"}}
 
 Environment:
+  AGENT_BROWSER_CONFIG           Path to config file (or use --config)
   AGENT_BROWSER_SESSION          Session name (default: "default")
   AGENT_BROWSER_SESSION_NAME     Auto-save/restore state persistence name
   AGENT_BROWSER_ENCRYPTION_KEY   64-char hex key for AES-256-GCM state encryption
   AGENT_BROWSER_STATE_EXPIRE_DAYS Auto-delete states older than N days (default: 30)
   AGENT_BROWSER_EXECUTABLE_PATH  Custom browser executable path
   AGENT_BROWSER_EXTENSIONS       Comma-separated browser extension paths
+  AGENT_BROWSER_HEADED           Show browser window (not headless)
+  AGENT_BROWSER_JSON             JSON output
+  AGENT_BROWSER_FULL             Full page screenshot
+  AGENT_BROWSER_DEBUG            Debug output
+  AGENT_BROWSER_IGNORE_HTTPS_ERRORS Ignore HTTPS certificate errors
   AGENT_BROWSER_PROVIDER         Browser provider (ios, browserbase, kernel, browseruse)
   AGENT_BROWSER_AUTO_CONNECT     Auto-discover and connect to running Chrome
+  AGENT_BROWSER_ALLOW_FILE_ACCESS Allow file:// URLs to access local files
   AGENT_BROWSER_STREAM_PORT      Enable WebSocket streaming on port (e.g., 9223)
   AGENT_BROWSER_IOS_DEVICE       Default iOS device name
   AGENT_BROWSER_IOS_UDID         Default iOS device UDID

@@ -423,7 +423,7 @@ The `-C` flag is useful for modern web apps that use custom clickable elements (
 | `--headed` | Show browser window (not headless) |
 | `--cdp <port\|url>` | Connect via Chrome DevTools Protocol (port or WebSocket URL) |
 | `--auto-connect` | Auto-discover and connect to running Chrome (or `AGENT_BROWSER_AUTO_CONNECT` env) |
-| `--config <path>` | Use a custom config file instead of default locations |
+| `--config <path>` | Use a custom config file (or `AGENT_BROWSER_CONFIG` env) |
 | `--debug` | Debug output |
 
 ## Configuration
@@ -449,10 +449,11 @@ Create an `agent-browser.json` file to set persistent defaults instead of repeat
 }
 ```
 
-Use `--config <path>` to load a specific config file instead of the defaults:
+Use `--config <path>` or `AGENT_BROWSER_CONFIG` to load a specific config file instead of the defaults:
 
 ```bash
 agent-browser --config ./ci-config.json open example.com
+AGENT_BROWSER_CONFIG=./ci-config.json agent-browser open example.com
 ```
 
 All options from the table above can be set in the config file using camelCase keys (e.g., `--executable-path` becomes `"executablePath"`, `--proxy-bypass` becomes `"proxyBypass"`). Unknown keys are ignored for forward compatibility.

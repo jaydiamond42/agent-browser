@@ -8,7 +8,7 @@ const CONFIG_DIR: &str = ".agent-browser";
 const CONFIG_FILENAME: &str = "config.json";
 const PROJECT_CONFIG_FILENAME: &str = "agent-browser.json";
 
-#[derive(Default, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Config {
     pub headed: Option<bool>,
@@ -102,38 +102,54 @@ fn parse_bool_arg(args: &[String], i: usize) -> (bool, bool) {
 /// Returns `Some(Some(path))` if --config <path> found, `Some(None)` if --config
 /// was the last arg with no value, `None` if --config not present.
 fn extract_config_path(args: &[String]) -> Option<Option<String>> {
+    const FLAGS_WITH_VALUE: &[&str] = &[
+        "--session",
+        "--headers",
+        "--executable-path",
+        "--cdp",
+        "--extension",
+        "--profile",
+        "--state",
+        "--proxy",
+        "--proxy-bypass",
+        "--args",
+        "--user-agent",
+        "-p",
+        "--provider",
+        "--device",
+        "--session-name",
+    ];
     let mut i = 0;
     while i < args.len() {
         if args[i] == "--config" {
             return Some(args.get(i + 1).cloned());
+        }
+        if FLAGS_WITH_VALUE.contains(&args[i].as_str()) {
+            i += 1;
         }
         i += 1;
     }
     None
 }
 
-pub fn load_config(args: &[String]) -> Config {
-    if let Some(maybe_path) = extract_config_path(args) {
-        let Some(path_str) = maybe_path else {
-            eprintln!(
-                "{} --config requires a file path",
-                color::warning_indicator(),
-            );
-            std::process::exit(1);
-        };
+pub fn load_config(args: &[String]) -> Result<Config, String> {
+    let explicit = extract_config_path(args)
+        .map(|p| ("--config", p))
+        .or_else(|| {
+            env::var("AGENT_BROWSER_CONFIG")
+                .ok()
+                .map(|p| ("AGENT_BROWSER_CONFIG", Some(p)))
+        });
+
+    if let Some((source, maybe_path)) = explicit {
+        let path_str =
+            maybe_path.ok_or_else(|| format!("{} requires a file path", source))?;
         let path = PathBuf::from(&path_str);
         if !path.exists() {
-            eprintln!(
-                "{} config file not found: {}",
-                color::warning_indicator(),
-                path_str
-            );
-            std::process::exit(1);
+            return Err(format!("config file not found: {}", path_str));
         }
-        match read_config_file(&path) {
-            Some(c) => return c,
-            None => std::process::exit(1),
-        }
+        return read_config_file(&path)
+            .ok_or_else(|| format!("failed to load config from {}", path_str));
     }
 
     let user_config = dirs::home_dir()
@@ -143,10 +159,10 @@ pub fn load_config(args: &[String]) -> Config {
 
     let project_config = read_config_file(&PathBuf::from(PROJECT_CONFIG_FILENAME));
 
-    match project_config {
+    Ok(match project_config {
         Some(project) => user_config.merge(project),
         None => user_config,
-    }
+    })
 }
 
 pub struct Flags {
@@ -186,7 +202,10 @@ pub struct Flags {
 }
 
 pub fn parse_flags(args: &[String]) -> Flags {
-    let config = load_config(args);
+    let config = load_config(args).unwrap_or_else(|e| {
+        eprintln!("{} {}", color::warning_indicator(), e);
+        std::process::exit(1);
+    });
 
     let extensions_env = env::var("AGENT_BROWSER_EXTENSIONS")
         .ok()
@@ -205,10 +224,14 @@ pub fn parse_flags(args: &[String]) -> Flags {
     };
 
     let mut flags = Flags {
-        json: config.json.unwrap_or(false),
-        full: config.full.unwrap_or(false),
-        headed: config.headed.unwrap_or(false),
-        debug: config.debug.unwrap_or(false),
+        json: env::var("AGENT_BROWSER_JSON").is_ok()
+            || config.json.unwrap_or(false),
+        full: env::var("AGENT_BROWSER_FULL").is_ok()
+            || config.full.unwrap_or(false),
+        headed: env::var("AGENT_BROWSER_HEADED").is_ok()
+            || config.headed.unwrap_or(false),
+        debug: env::var("AGENT_BROWSER_DEBUG").is_ok()
+            || config.debug.unwrap_or(false),
         session: env::var("AGENT_BROWSER_SESSION").ok()
             .or(config.session)
             .unwrap_or_else(|| "default".to_string()),
@@ -231,7 +254,8 @@ pub fn parse_flags(args: &[String]) -> Flags {
             .or(config.user_agent),
         provider: env::var("AGENT_BROWSER_PROVIDER").ok()
             .or(config.provider),
-        ignore_https_errors: config.ignore_https_errors.unwrap_or(false),
+        ignore_https_errors: env::var("AGENT_BROWSER_IGNORE_HTTPS_ERRORS").is_ok()
+            || config.ignore_https_errors.unwrap_or(false),
         allow_file_access: env::var("AGENT_BROWSER_ALLOW_FILE_ACCESS").is_ok()
             || config.allow_file_access.unwrap_or(false),
         device: env::var("AGENT_BROWSER_IOS_DEVICE").ok()
@@ -781,6 +805,11 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_config_path_skips_flag_values() {
+        assert_eq!(extract_config_path(&args("--args --config open")), None);
+    }
+
+    #[test]
     fn test_clean_args_removes_config() {
         let cleaned = clean_args(&args("--config ./config.json open example.com"));
         assert_eq!(cleaned, vec!["open", "example.com"]);
@@ -801,9 +830,44 @@ mod tests {
             "open".to_string(),
             "example.com".to_string(),
         ];
-        let config = load_config(&flag_args);
+        let config = load_config(&flag_args).unwrap();
         assert_eq!(config.headed, Some(true));
         assert_eq!(config.session.as_deref(), Some("custom"));
+
+        let _ = fs::remove_file(&config_path);
+        let _ = fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn test_load_config_error_missing_config_value() {
+        let result = load_config(&args("--config"));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("requires a file path"));
+    }
+
+    #[test]
+    fn test_load_config_error_nonexistent_file() {
+        let result = load_config(&args("--config /nonexistent/config.json open"));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("config file not found"));
+    }
+
+    #[test]
+    fn test_load_config_error_malformed_explicit() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join("ab-test-explicit-malformed");
+        let _ = fs::create_dir_all(&dir);
+        let config_path = dir.join("bad.json");
+        let mut f = fs::File::create(&config_path).unwrap();
+        writeln!(f, "{{not valid}}").unwrap();
+
+        let flag_args = vec![
+            "--config".to_string(),
+            config_path.to_string_lossy().to_string(),
+        ];
+        let result = load_config(&flag_args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("failed to load config"));
 
         let _ = fs::remove_file(&config_path);
         let _ = fs::remove_dir(&dir);
