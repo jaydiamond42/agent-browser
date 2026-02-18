@@ -10,7 +10,7 @@ export interface BaseCommand {
 export interface LaunchCommand extends BaseCommand {
   action: 'launch';
   headless?: boolean;
-  viewport?: { width: number; height: number };
+  viewport?: { width: number; height: number } | null;
   browser?: 'chromium' | 'firefox' | 'webkit';
   headers?: Record<string, string>;
   executablePath?: string;
@@ -850,7 +850,7 @@ export interface TabCloseCommand extends BaseCommand {
 
 export interface WindowNewCommand extends BaseCommand {
   action: 'window_new';
-  viewport?: { width: number; height: number };
+  viewport?: { width: number; height: number } | null;
 }
 
 // Union of all command types

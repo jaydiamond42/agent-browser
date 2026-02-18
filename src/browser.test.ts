@@ -484,6 +484,42 @@ describe('BrowserManager', () => {
       expect(size?.width).toBe(1920);
       expect(size?.height).toBe(1080);
     });
+
+    it('should disable viewport when --start-maximized is in args', async () => {
+      const testBrowser = new BrowserManager();
+      await testBrowser.launch({ headless: true, args: ['--start-maximized'] });
+      const page = testBrowser.getPage();
+      expect(page.viewportSize()).toBeNull();
+      await testBrowser.close();
+    });
+
+    it('should disable viewport when --window-size is in args', async () => {
+      const testBrowser = new BrowserManager();
+      await testBrowser.launch({ headless: true, args: ['--window-size=800,600'] });
+      const page = testBrowser.getPage();
+      expect(page.viewportSize()).toBeNull();
+      await testBrowser.close();
+    });
+
+    it('should use default viewport when no window size args', async () => {
+      const testBrowser = new BrowserManager();
+      await testBrowser.launch({ headless: true });
+      const page = testBrowser.getPage();
+      expect(page.viewportSize()).toEqual({ width: 1280, height: 720 });
+      await testBrowser.close();
+    });
+
+    it('should use explicit viewport even with --start-maximized', async () => {
+      const testBrowser = new BrowserManager();
+      await testBrowser.launch({
+        headless: true,
+        args: ['--start-maximized'],
+        viewport: { width: 800, height: 600 },
+      });
+      const page = testBrowser.getPage();
+      expect(page.viewportSize()).toEqual({ width: 800, height: 600 });
+      await testBrowser.close();
+    });
   });
 
   describe('snapshot', () => {

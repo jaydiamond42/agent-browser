@@ -1156,7 +1156,6 @@ export class BrowserManager {
 
     const launcher =
       browserType === 'firefox' ? firefox : browserType === 'webkit' ? webkit : chromium;
-    const viewport = options.viewport ?? { width: 1280, height: 720 };
 
     // Build base args array with file access flags if enabled
     // --allow-file-access-from-files: allows file:// URLs to read other file:// URLs via XHR/fetch
@@ -1169,6 +1168,18 @@ export class BrowserManager {
       : fileAccessArgs.length > 0
         ? fileAccessArgs
         : undefined;
+
+    // Auto-detect args that control window size and disable viewport emulation
+    // so Playwright doesn't override the browser's own sizing behavior
+    const hasWindowSizeArgs = baseArgs?.some(
+      (arg) => arg === '--start-maximized' || arg.startsWith('--window-size=')
+    );
+    const viewport =
+      options.viewport !== undefined
+        ? options.viewport
+        : hasWindowSizeArgs
+          ? null
+          : { width: 1280, height: 720 };
 
     let context: BrowserContext;
     if (hasExtensions) {
@@ -1597,16 +1608,16 @@ export class BrowserManager {
   /**
    * Create a new window (new context)
    */
-  async newWindow(viewport?: {
-    width: number;
-    height: number;
-  }): Promise<{ index: number; total: number }> {
+  async newWindow(viewport?: { width: number; height: number } | null): Promise<{
+    index: number;
+    total: number;
+  }> {
     if (!this.browser) {
       throw new Error('Browser not launched');
     }
 
     const context = await this.browser.newContext({
-      viewport: viewport ?? { width: 1280, height: 720 },
+      viewport: viewport === undefined ? { width: 1280, height: 720 } : viewport,
     });
     context.setDefaultTimeout(60000);
     this.contexts.push(context);

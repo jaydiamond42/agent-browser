@@ -16,6 +16,7 @@ const launchSchema = baseCommandSchema.extend({
       width: z.number().positive(),
       height: z.number().positive(),
     })
+    .nullable()
     .optional(),
   browser: z.enum(['chromium', 'firefox', 'webkit']).optional(),
   cdpPort: z.number().positive().optional(),
@@ -822,6 +823,7 @@ const windowNewSchema = baseCommandSchema.extend({
       width: z.number().positive(),
       height: z.number().positive(),
     })
+    .nullable()
     .optional(),
 });
 
