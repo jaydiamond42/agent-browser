@@ -242,6 +242,18 @@ agent-browser reload                  # Reload page
 --debug                  # Debug output
 ```
 
+## Command chaining
+
+Chain commands with `&&` in a single shell invocation. The browser persists via a background daemon, so chaining works naturally and is more efficient than separate calls:
+
+```bash
+agent-browser open example.com && agent-browser wait --load networkidle && agent-browser snapshot -i
+agent-browser fill @e1 "user@example.com" && agent-browser fill @e2 "pass" && agent-browser click @e3
+agent-browser open example.com && agent-browser wait --load networkidle && agent-browser screenshot page.png
+```
+
+Use `&&` when you don't need to read intermediate output. Run commands separately when you need to parse output first (e.g., snapshot to discover refs, then interact with those refs).
+
 ## Local files
 
 Open local files (PDFs, HTML) using `file://` URLs:

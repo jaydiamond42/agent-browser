@@ -543,6 +543,23 @@ agent-browser fill @e3 "input text"
 agent-browser snapshot -i --json
 ```
 
+### Command Chaining
+
+Commands can be chained with `&&` in a single shell invocation. The browser persists via a background daemon, so chaining is safe and more efficient:
+
+```bash
+# Open, wait for load, and snapshot in one call
+agent-browser open example.com && agent-browser wait --load networkidle && agent-browser snapshot -i
+
+# Chain multiple interactions
+agent-browser fill @e1 "user@example.com" && agent-browser fill @e2 "pass" && agent-browser click @e3
+
+# Navigate and screenshot
+agent-browser open example.com && agent-browser wait --load networkidle && agent-browser screenshot page.png
+```
+
+Use `&&` when you don't need intermediate output. Run commands separately when you need to parse output first (e.g., snapshot to discover refs before interacting).
+
 ## Headed Mode
 
 Show the browser window for debugging:

@@ -2000,6 +2000,13 @@ Examples:
   agent-browser --profile ~/.myapp open example.com    # Persistent profile
   agent-browser --session-name myapp open example.com  # Auto-save/restore state
 
+Command Chaining:
+  Chain commands with && in a single shell call (browser persists via daemon):
+
+  agent-browser open example.com && agent-browser wait --load networkidle && agent-browser snapshot -i
+  agent-browser fill @e1 "user@example.com" && agent-browser fill @e2 "pass" && agent-browser click @e3
+  agent-browser open example.com && agent-browser wait --load networkidle && agent-browser screenshot page.png
+
 iOS Simulator (requires Xcode and Appium):
   agent-browser -p ios open example.com                    # Use default iPhone
   agent-browser -p ios --device "iPhone 15 Pro" open url   # Specific device
