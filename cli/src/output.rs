@@ -1878,8 +1878,21 @@ Options:
   --cdp <port>               Connect via CDP (Chrome DevTools Protocol)
   --auto-connect             Auto-discover and connect to running Chrome
   --session-name <name>      Auto-save/restore session state (cookies, localStorage)
+  --config <path>            Use a custom config file (instead of default locations)
   --debug                    Debug output
   --version, -V              Show version
+
+Configuration:
+  agent-browser looks for agent-browser.json in these locations (lowest to highest priority):
+    1. ~/.config/agent-browser.json      User-level defaults
+    2. ./agent-browser.json              Project-level overrides
+    3. Environment variables             Override config file values
+    4. CLI flags                         Override everything
+
+  Use --config <path> to load a specific config file instead of the defaults.
+
+  Example agent-browser.json:
+    {{"headed": true, "proxy": "http://localhost:8080", "profile": "./browser-data"}}
 
 Environment:
   AGENT_BROWSER_SESSION          Session name (default: "default")

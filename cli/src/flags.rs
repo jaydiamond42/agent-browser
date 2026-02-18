@@ -1,4 +1,107 @@
+use serde::Deserialize;
 use std::env;
+use std::fs;
+use std::path::PathBuf;
+
+const CONFIG_FILENAME: &str = "agent-browser.json";
+
+#[derive(Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Config {
+    pub headed: Option<bool>,
+    pub json: Option<bool>,
+    pub debug: Option<bool>,
+    pub session: Option<String>,
+    pub session_name: Option<String>,
+    pub executable_path: Option<String>,
+    pub extensions: Option<Vec<String>>,
+    pub profile: Option<String>,
+    pub state: Option<String>,
+    pub proxy: Option<String>,
+    pub proxy_bypass: Option<String>,
+    pub args: Option<String>,
+    pub user_agent: Option<String>,
+    pub provider: Option<String>,
+    pub device: Option<String>,
+    pub ignore_https_errors: Option<bool>,
+    pub allow_file_access: Option<bool>,
+    pub cdp: Option<String>,
+    pub auto_connect: Option<bool>,
+    pub headers: Option<String>,
+}
+
+impl Config {
+    fn merge(self, other: Config) -> Config {
+        Config {
+            headed: other.headed.or(self.headed),
+            json: other.json.or(self.json),
+            debug: other.debug.or(self.debug),
+            session: other.session.or(self.session),
+            session_name: other.session_name.or(self.session_name),
+            executable_path: other.executable_path.or(self.executable_path),
+            extensions: other.extensions.or(self.extensions),
+            profile: other.profile.or(self.profile),
+            state: other.state.or(self.state),
+            proxy: other.proxy.or(self.proxy),
+            proxy_bypass: other.proxy_bypass.or(self.proxy_bypass),
+            args: other.args.or(self.args),
+            user_agent: other.user_agent.or(self.user_agent),
+            provider: other.provider.or(self.provider),
+            device: other.device.or(self.device),
+            ignore_https_errors: other.ignore_https_errors.or(self.ignore_https_errors),
+            allow_file_access: other.allow_file_access.or(self.allow_file_access),
+            cdp: other.cdp.or(self.cdp),
+            auto_connect: other.auto_connect.or(self.auto_connect),
+            headers: other.headers.or(self.headers),
+        }
+    }
+}
+
+fn read_config_file(path: &PathBuf) -> Option<Config> {
+    let content = fs::read_to_string(path).ok()?;
+    match serde_json::from_str::<Config>(&content) {
+        Ok(config) => Some(config),
+        Err(e) => {
+            eprintln!(
+                "Warning: invalid config file {}: {}",
+                path.display(),
+                e
+            );
+            None
+        }
+    }
+}
+
+/// Extract --config <path> from args before full flag parsing
+fn extract_config_path(args: &[String]) -> Option<String> {
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--config" {
+            return args.get(i + 1).cloned();
+        }
+        i += 1;
+    }
+    None
+}
+
+pub fn load_config(args: &[String]) -> Config {
+    if let Some(path) = extract_config_path(args) {
+        let path = PathBuf::from(path);
+        return read_config_file(&path).unwrap_or_default();
+    }
+
+    let user_config = dirs::config_dir()
+        .map(|d| d.join(CONFIG_FILENAME))
+        .and_then(|p| read_config_file(&p))
+        .unwrap_or_default();
+
+    let project_config = read_config_file(&PathBuf::from(CONFIG_FILENAME));
+
+    match project_config {
+        Some(project) => user_config.merge(project),
+        None => user_config,
+    }
+}
 
 pub struct Flags {
     pub json: bool,
@@ -37,6 +140,8 @@ pub struct Flags {
 }
 
 pub fn parse_flags(args: &[String]) -> Flags {
+    let config = load_config(args);
+
     let extensions_env = env::var("AGENT_BROWSER_EXTENSIONS")
         .ok()
         .map(|s| {
@@ -47,29 +152,48 @@ pub fn parse_flags(args: &[String]) -> Flags {
         })
         .unwrap_or_default();
 
+    let extensions = if !extensions_env.is_empty() {
+        extensions_env
+    } else {
+        config.extensions.unwrap_or_default()
+    };
+
     let mut flags = Flags {
-        json: false,
+        json: config.json.unwrap_or(false),
         full: false,
-        headed: false,
-        debug: false,
-        session: env::var("AGENT_BROWSER_SESSION").unwrap_or_else(|_| "default".to_string()),
-        headers: None,
-        executable_path: env::var("AGENT_BROWSER_EXECUTABLE_PATH").ok(),
-        cdp: None,
-        extensions: extensions_env,
-        profile: env::var("AGENT_BROWSER_PROFILE").ok(),
-        state: env::var("AGENT_BROWSER_STATE").ok(),
-        proxy: env::var("AGENT_BROWSER_PROXY").ok(),
-        proxy_bypass: env::var("AGENT_BROWSER_PROXY_BYPASS").ok(),
-        args: env::var("AGENT_BROWSER_ARGS").ok(),
-        user_agent: env::var("AGENT_BROWSER_USER_AGENT").ok(),
-        provider: env::var("AGENT_BROWSER_PROVIDER").ok(),
-        ignore_https_errors: false,
-        allow_file_access: env::var("AGENT_BROWSER_ALLOW_FILE_ACCESS").is_ok(),
-        device: env::var("AGENT_BROWSER_IOS_DEVICE").ok(),
-        auto_connect: env::var("AGENT_BROWSER_AUTO_CONNECT").is_ok(),
-        session_name: env::var("AGENT_BROWSER_SESSION_NAME").ok(),
-        // Track CLI-passed flags (default false, set to true when flag is passed)
+        headed: config.headed.unwrap_or(false),
+        debug: config.debug.unwrap_or(false),
+        session: env::var("AGENT_BROWSER_SESSION").ok()
+            .or(config.session)
+            .unwrap_or_else(|| "default".to_string()),
+        headers: config.headers,
+        executable_path: env::var("AGENT_BROWSER_EXECUTABLE_PATH").ok()
+            .or(config.executable_path),
+        cdp: config.cdp,
+        extensions,
+        profile: env::var("AGENT_BROWSER_PROFILE").ok()
+            .or(config.profile),
+        state: env::var("AGENT_BROWSER_STATE").ok()
+            .or(config.state),
+        proxy: env::var("AGENT_BROWSER_PROXY").ok()
+            .or(config.proxy),
+        proxy_bypass: env::var("AGENT_BROWSER_PROXY_BYPASS").ok()
+            .or(config.proxy_bypass),
+        args: env::var("AGENT_BROWSER_ARGS").ok()
+            .or(config.args),
+        user_agent: env::var("AGENT_BROWSER_USER_AGENT").ok()
+            .or(config.user_agent),
+        provider: env::var("AGENT_BROWSER_PROVIDER").ok()
+            .or(config.provider),
+        ignore_https_errors: config.ignore_https_errors.unwrap_or(false),
+        allow_file_access: env::var("AGENT_BROWSER_ALLOW_FILE_ACCESS").is_ok()
+            || config.allow_file_access.unwrap_or(false),
+        device: env::var("AGENT_BROWSER_IOS_DEVICE").ok()
+            .or(config.device),
+        auto_connect: env::var("AGENT_BROWSER_AUTO_CONNECT").is_ok()
+            || config.auto_connect.unwrap_or(false),
+        session_name: env::var("AGENT_BROWSER_SESSION_NAME").ok()
+            .or(config.session_name),
         cli_executable_path: false,
         cli_extensions: false,
         cli_profile: false,
@@ -186,6 +310,10 @@ pub fn parse_flags(args: &[String]) -> Flags {
                     i += 1;
                 }
             }
+            "--config" => {
+                // Already handled by load_config(); skip the value
+                i += 1;
+            }
             _ => {}
         }
         i += 1;
@@ -224,6 +352,7 @@ pub fn clean_args(args: &[String]) -> Vec<String> {
         "--provider",
         "--device",
         "--session-name",
+        "--config",
     ];
 
     for arg in args.iter() {
@@ -400,5 +529,199 @@ mod tests {
         assert!(flags.cli_proxy);
         assert!(!flags.cli_extensions);
         assert!(!flags.cli_state);
+    }
+
+    // === Config file tests ===
+
+    #[test]
+    fn test_config_deserialize_full() {
+        let json = r#"{
+            "headed": true,
+            "json": true,
+            "debug": true,
+            "session": "test-session",
+            "sessionName": "my-app",
+            "executablePath": "/usr/bin/chromium",
+            "extensions": ["/ext1", "/ext2"],
+            "profile": "/tmp/profile",
+            "state": "/tmp/state.json",
+            "proxy": "http://proxy:8080",
+            "proxyBypass": "localhost",
+            "args": "--no-sandbox",
+            "userAgent": "test-agent",
+            "provider": "ios",
+            "device": "iPhone 15",
+            "ignoreHttpsErrors": true,
+            "allowFileAccess": true,
+            "cdp": "9222",
+            "autoConnect": true,
+            "headers": "{\"Auth\":\"token\"}"
+        }"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.headed, Some(true));
+        assert_eq!(config.json, Some(true));
+        assert_eq!(config.debug, Some(true));
+        assert_eq!(config.session.as_deref(), Some("test-session"));
+        assert_eq!(config.session_name.as_deref(), Some("my-app"));
+        assert_eq!(config.executable_path.as_deref(), Some("/usr/bin/chromium"));
+        assert_eq!(config.extensions, Some(vec!["/ext1".to_string(), "/ext2".to_string()]));
+        assert_eq!(config.profile.as_deref(), Some("/tmp/profile"));
+        assert_eq!(config.state.as_deref(), Some("/tmp/state.json"));
+        assert_eq!(config.proxy.as_deref(), Some("http://proxy:8080"));
+        assert_eq!(config.proxy_bypass.as_deref(), Some("localhost"));
+        assert_eq!(config.args.as_deref(), Some("--no-sandbox"));
+        assert_eq!(config.user_agent.as_deref(), Some("test-agent"));
+        assert_eq!(config.provider.as_deref(), Some("ios"));
+        assert_eq!(config.device.as_deref(), Some("iPhone 15"));
+        assert_eq!(config.ignore_https_errors, Some(true));
+        assert_eq!(config.allow_file_access, Some(true));
+        assert_eq!(config.cdp.as_deref(), Some("9222"));
+        assert_eq!(config.auto_connect, Some(true));
+        assert_eq!(config.headers.as_deref(), Some("{\"Auth\":\"token\"}"));
+    }
+
+    #[test]
+    fn test_config_deserialize_partial() {
+        let json = r#"{"headed": true, "proxy": "http://localhost:8080"}"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.headed, Some(true));
+        assert_eq!(config.proxy.as_deref(), Some("http://localhost:8080"));
+        assert_eq!(config.session, None);
+        assert_eq!(config.extensions, None);
+        assert_eq!(config.debug, None);
+    }
+
+    #[test]
+    fn test_config_deserialize_empty() {
+        let config: Config = serde_json::from_str("{}").unwrap();
+        assert_eq!(config.headed, None);
+        assert_eq!(config.session, None);
+        assert_eq!(config.proxy, None);
+    }
+
+    #[test]
+    fn test_config_ignores_unknown_keys() {
+        let json = r#"{"headed": true, "unknownFutureKey": "value", "anotherOne": 42}"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.headed, Some(true));
+    }
+
+    #[test]
+    fn test_config_merge_project_overrides_user() {
+        let user = Config {
+            headed: Some(true),
+            proxy: Some("http://user-proxy:8080".to_string()),
+            profile: Some("/user/profile".to_string()),
+            ..Config::default()
+        };
+        let project = Config {
+            proxy: Some("http://project-proxy:9090".to_string()),
+            debug: Some(true),
+            ..Config::default()
+        };
+        let merged = user.merge(project);
+        assert_eq!(merged.headed, Some(true)); // kept from user
+        assert_eq!(merged.proxy.as_deref(), Some("http://project-proxy:9090")); // overridden by project
+        assert_eq!(merged.profile.as_deref(), Some("/user/profile")); // kept from user
+        assert_eq!(merged.debug, Some(true)); // added by project
+    }
+
+    #[test]
+    fn test_config_merge_none_does_not_override() {
+        let user = Config {
+            headed: Some(true),
+            proxy: Some("http://proxy:8080".to_string()),
+            ..Config::default()
+        };
+        let project = Config::default();
+        let merged = user.merge(project);
+        assert_eq!(merged.headed, Some(true));
+        assert_eq!(merged.proxy.as_deref(), Some("http://proxy:8080"));
+    }
+
+    #[test]
+    fn test_load_config_from_file() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join("ab-test-config");
+        let _ = fs::create_dir_all(&dir);
+        let config_path = dir.join("test-config.json");
+        let mut f = fs::File::create(&config_path).unwrap();
+        writeln!(f, r#"{{"headed": true, "proxy": "http://test:1234"}}"#).unwrap();
+
+        let config = read_config_file(&config_path).unwrap();
+        assert_eq!(config.headed, Some(true));
+        assert_eq!(config.proxy.as_deref(), Some("http://test:1234"));
+
+        let _ = fs::remove_file(&config_path);
+        let _ = fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn test_load_config_missing_file_returns_none() {
+        let result = read_config_file(&PathBuf::from("/nonexistent/agent-browser.json"));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_load_config_malformed_json_returns_none() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join("ab-test-malformed");
+        let _ = fs::create_dir_all(&dir);
+        let config_path = dir.join("bad-config.json");
+        let mut f = fs::File::create(&config_path).unwrap();
+        writeln!(f, "{{not valid json}}").unwrap();
+
+        let result = read_config_file(&config_path);
+        assert!(result.is_none());
+
+        let _ = fs::remove_file(&config_path);
+        let _ = fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn test_extract_config_path() {
+        assert_eq!(
+            extract_config_path(&args("--config ./my-config.json open example.com")),
+            Some("./my-config.json".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_config_path_missing() {
+        assert_eq!(extract_config_path(&args("open example.com")), None);
+    }
+
+    #[test]
+    fn test_extract_config_path_no_value() {
+        assert_eq!(extract_config_path(&args("--config")), None);
+    }
+
+    #[test]
+    fn test_clean_args_removes_config() {
+        let cleaned = clean_args(&args("--config ./config.json open example.com"));
+        assert_eq!(cleaned, vec!["open", "example.com"]);
+    }
+
+    #[test]
+    fn test_load_config_with_config_flag() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join("ab-test-flag-config");
+        let _ = fs::create_dir_all(&dir);
+        let config_path = dir.join("custom.json");
+        let mut f = fs::File::create(&config_path).unwrap();
+        writeln!(f, r#"{{"headed": true, "session": "custom"}}"#).unwrap();
+
+        let flag_args = vec![
+            "--config".to_string(),
+            config_path.to_string_lossy().to_string(),
+            "open".to_string(),
+            "example.com".to_string(),
+        ];
+        let config = load_config(&flag_args);
+        assert_eq!(config.headed, Some(true));
+        assert_eq!(config.session.as_deref(), Some("custom"));
+
+        let _ = fs::remove_file(&config_path);
+        let _ = fs::remove_dir(&dir);
     }
 }
