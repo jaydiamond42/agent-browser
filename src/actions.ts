@@ -604,10 +604,9 @@ const ANNOTATION_OVERLAY_ID = '__agent_browser_annotations__';
 
 async function removeAnnotationOverlay(page: Page): Promise<void> {
   await page
-    .evaluate((id) => {
-      const el = document.getElementById(id);
-      if (el) el.remove();
-    }, ANNOTATION_OVERLAY_ID)
+    .evaluate(
+      `(() => { const el = document.getElementById(${JSON.stringify(ANNOTATION_OVERLAY_ID)}); if (el) el.remove(); })()`
+    )
     .catch(() => {});
 }
 
@@ -630,6 +629,8 @@ async function handleScreenshot(
   if (command.selector) {
     target = browser.getLocator(command.selector);
   }
+
+  let overlayInjected = false;
 
   try {
     let savePath = command.path;
@@ -661,7 +662,7 @@ async function handleScreenshot(
               ref,
               number: num,
               role: data.role,
-              name: data.name,
+              name: data.name || undefined,
               box: {
                 x: Math.round(box.x),
                 y: Math.round(box.y),
@@ -725,47 +726,32 @@ async function handleScreenshot(
           height: a.box.height,
         }));
 
-        await page.evaluate(
-          ({ items, id }) => {
-            const c = document.createElement('div');
-            c.id = id;
-            c.style.cssText =
-              'position:absolute;top:0;left:0;width:0;height:0;pointer-events:none;z-index:2147483647;';
-            const sx = window.scrollX;
-            const sy = window.scrollY;
-            for (let i = 0; i < items.length; i++) {
-              const it = items[i];
-              const b = document.createElement('div');
-              b.style.cssText =
-                'position:absolute;left:' +
-                (it.x + sx) +
-                'px;top:' +
-                (it.y + sy) +
-                'px;width:' +
-                it.width +
-                'px;height:' +
-                it.height +
-                'px;border:2px solid rgba(255,0,0,0.8);box-sizing:border-box;pointer-events:none;';
-              const l = document.createElement('div');
-              l.textContent = String(it.number);
-              const labelTop = it.y + sy < 14 ? '2px' : '-14px';
-              l.style.cssText =
-                'position:absolute;top:' +
-                labelTop +
-                ';left:-2px;background:rgba(255,0,0,0.9);color:#fff;font:bold 11px/14px monospace;padding:0 4px;border-radius:2px;white-space:nowrap;';
-              b.appendChild(l);
-              c.appendChild(b);
-            }
-            document.documentElement.appendChild(c);
-          },
-          { items: overlayData, id: ANNOTATION_OVERLAY_ID }
-        );
+        await page.evaluate(`(() => {
+          var items = ${JSON.stringify(overlayData)};
+          var id = ${JSON.stringify(ANNOTATION_OVERLAY_ID)};
+          var c = document.createElement('div');
+          c.id = id;
+          c.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;pointer-events:none;z-index:2147483647;';
+          for (var i = 0; i < items.length; i++) {
+            var it = items[i];
+            var b = document.createElement('div');
+            b.style.cssText = 'position:fixed;left:' + it.x + 'px;top:' + it.y + 'px;width:' + it.width + 'px;height:' + it.height + 'px;border:2px solid rgba(255,0,0,0.8);box-sizing:border-box;pointer-events:none;';
+            var l = document.createElement('div');
+            l.textContent = String(it.number);
+            var labelTop = it.y < 14 ? '2px' : '-14px';
+            l.style.cssText = 'position:absolute;top:' + labelTop + ';left:-2px;background:rgba(255,0,0,0.9);color:#fff;font:bold 11px/14px monospace;padding:0 4px;border-radius:2px;white-space:nowrap;';
+            b.appendChild(l);
+            c.appendChild(b);
+          }
+          document.documentElement.appendChild(c);
+        })()`);
+        overlayInjected = true;
       }
     }
 
     await target.screenshot({ ...options, path: savePath });
 
-    if (command.annotate) {
+    if (overlayInjected) {
       await removeAnnotationOverlay(page);
     }
 
@@ -774,7 +760,7 @@ async function handleScreenshot(
       ...(annotations && annotations.length > 0 ? { annotations } : {}),
     });
   } catch (error) {
-    if (command.annotate) {
+    if (overlayInjected) {
       await removeAnnotationOverlay(page);
     }
     if (command.selector) {
