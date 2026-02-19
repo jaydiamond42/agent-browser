@@ -994,6 +994,7 @@ Options:
   --annotate           Overlay numbered labels on interactive elements.
                        Each label [N] corresponds to ref @eN from snapshot.
                        Prints a legend mapping labels to element roles/names.
+                       With --json, annotations are included in the response.
 
 Global Options:
   --json               Output as JSON
@@ -1005,6 +1006,7 @@ Examples:
   agent-browser screenshot --full ./full-page.png
   agent-browser screenshot --annotate              # Labeled screenshot + legend
   agent-browser screenshot --annotate ./page.png   # Save annotated screenshot
+  agent-browser screenshot --annotate --json       # JSON output with annotations
 "##
         }
         "pdf" => {
@@ -1963,7 +1965,7 @@ Options:
   --device <name>            iOS device name (e.g., "iPhone 15 Pro")
   --json                     JSON output
   --full, -f                 Full page screenshot
-  --annotate                 Annotated screenshot with numbered element labels
+  --annotate                 Annotated screenshot with numbered labels and legend
   --headed                   Show browser window (not headless)
   --cdp <port>               Connect via CDP (Chrome DevTools Protocol)
   --auto-connect             Auto-discover and connect to running Chrome
@@ -2002,7 +2004,7 @@ Environment:
   AGENT_BROWSER_HEADED           Show browser window (not headless)
   AGENT_BROWSER_JSON             JSON output
   AGENT_BROWSER_FULL             Full page screenshot
-  AGENT_BROWSER_ANNOTATE         Annotated screenshot with numbered element labels
+  AGENT_BROWSER_ANNOTATE         Annotated screenshot with numbered labels and legend
   AGENT_BROWSER_DEBUG            Debug output
   AGENT_BROWSER_IGNORE_HTTPS_ERRORS Ignore HTTPS certificate errors
   AGENT_BROWSER_PROVIDER         Browser provider (ios, browserbase, kernel, browseruse)
