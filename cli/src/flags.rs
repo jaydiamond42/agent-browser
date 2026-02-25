@@ -35,6 +35,12 @@ pub struct Config {
     pub annotate: Option<bool>,
     pub color_scheme: Option<String>,
     pub download_path: Option<String>,
+    pub content_boundaries: Option<bool>,
+    pub max_output: Option<usize>,
+    pub allowed_domains: Option<Vec<String>>,
+    pub action_policy: Option<String>,
+    pub confirm_actions: Option<String>,
+    pub confirm_interactive: Option<bool>,
 }
 
 impl Config {
@@ -70,6 +76,12 @@ impl Config {
             annotate: other.annotate.or(self.annotate),
             color_scheme: other.color_scheme.or(self.color_scheme),
             download_path: other.download_path.or(self.download_path),
+            content_boundaries: other.content_boundaries.or(self.content_boundaries),
+            max_output: other.max_output.or(self.max_output),
+            allowed_domains: other.allowed_domains.or(self.allowed_domains),
+            action_policy: other.action_policy.or(self.action_policy),
+            confirm_actions: other.confirm_actions.or(self.confirm_actions),
+            confirm_interactive: other.confirm_interactive.or(self.confirm_interactive),
         }
     }
 }
@@ -116,6 +128,11 @@ fn parse_bool_arg(args: &[String], i: usize) -> (bool, bool) {
 /// Extract --config <path> from args before full flag parsing.
 /// Returns `Some(Some(path))` if --config <path> found, `Some(None)` if --config
 /// was the last arg with no value, `None` if --config not present.
+///
+/// Only flags that consume a following argument need to be listed here.
+/// Boolean flags (--content-boundaries, --confirm-interactive, etc.) are
+/// intentionally absent -- they don't take a value, so they can't cause
+/// the next argument to be mis-consumed.
 fn extract_config_path(args: &[String]) -> Option<Option<String>> {
     const FLAGS_WITH_VALUE: &[&str] = &[
         "--session",
@@ -135,6 +152,10 @@ fn extract_config_path(args: &[String]) -> Option<Option<String>> {
         "--session-name",
         "--color-scheme",
         "--download-path",
+        "--max-output",
+        "--allowed-domains",
+        "--action-policy",
+        "--confirm-actions",
     ];
     let mut i = 0;
     while i < args.len() {
@@ -207,6 +228,12 @@ pub struct Flags {
     pub annotate: bool,
     pub color_scheme: Option<String>,
     pub download_path: Option<String>,
+    pub content_boundaries: bool,
+    pub max_output: Option<usize>,
+    pub allowed_domains: Option<Vec<String>>,
+    pub action_policy: Option<String>,
+    pub confirm_actions: Option<String>,
+    pub confirm_interactive: bool,
 
     // Track which launch-time options were explicitly passed via CLI
     // (as opposed to being set only via environment variables)
@@ -292,6 +319,20 @@ pub fn parse_flags(args: &[String]) -> Flags {
             .or(config.color_scheme),
         download_path: env::var("AGENT_BROWSER_DOWNLOAD_PATH").ok()
             .or(config.download_path),
+        content_boundaries: env_var_is_truthy("AGENT_BROWSER_CONTENT_BOUNDARIES")
+            || config.content_boundaries.unwrap_or(false),
+        max_output: env::var("AGENT_BROWSER_MAX_OUTPUT").ok()
+            .and_then(|s| s.parse().ok())
+            .or(config.max_output),
+        allowed_domains: env::var("AGENT_BROWSER_ALLOWED_DOMAINS").ok()
+            .map(|s| s.split(',').map(|d| d.trim().to_lowercase()).filter(|d| !d.is_empty()).collect())
+            .or(config.allowed_domains),
+        action_policy: env::var("AGENT_BROWSER_ACTION_POLICY").ok()
+            .or(config.action_policy),
+        confirm_actions: env::var("AGENT_BROWSER_CONFIRM_ACTIONS").ok()
+            .or(config.confirm_actions),
+        confirm_interactive: env_var_is_truthy("AGENT_BROWSER_CONFIRM_INTERACTIVE")
+            || config.confirm_interactive.unwrap_or(false),
         cli_executable_path: false,
         cli_extensions: false,
         cli_profile: false,
@@ -455,6 +496,44 @@ pub fn parse_flags(args: &[String]) -> Flags {
                     i += 1;
                 }
             }
+            "--content-boundaries" => {
+                let (val, consumed) = parse_bool_arg(args, i);
+                flags.content_boundaries = val;
+                if consumed { i += 1; }
+            }
+            "--max-output" => {
+                if let Some(s) = args.get(i + 1) {
+                    if let Ok(n) = s.parse::<usize>() {
+                        flags.max_output = Some(n);
+                    }
+                    i += 1;
+                }
+            }
+            "--allowed-domains" => {
+                if let Some(s) = args.get(i + 1) {
+                    flags.allowed_domains = Some(
+                        s.split(',').map(|d| d.trim().to_lowercase()).filter(|d| !d.is_empty()).collect()
+                    );
+                    i += 1;
+                }
+            }
+            "--action-policy" => {
+                if let Some(s) = args.get(i + 1) {
+                    flags.action_policy = Some(s.clone());
+                    i += 1;
+                }
+            }
+            "--confirm-actions" => {
+                if let Some(s) = args.get(i + 1) {
+                    flags.confirm_actions = Some(s.clone());
+                    i += 1;
+                }
+            }
+            "--confirm-interactive" => {
+                let (val, consumed) = parse_bool_arg(args, i);
+                flags.confirm_interactive = val;
+                if consumed { i += 1; }
+            }
             "--config" => {
                 // Already handled by load_config(); skip the value
                 i += 1;
@@ -480,6 +559,8 @@ pub fn clean_args(args: &[String]) -> Vec<String> {
         "--allow-file-access",
         "--auto-connect",
         "--annotate",
+        "--content-boundaries",
+        "--confirm-interactive",
     ];
     // Global flags that always take a value (need to skip the next arg too)
     const GLOBAL_FLAGS_WITH_VALUE: &[&str] = &[
@@ -500,6 +581,10 @@ pub fn clean_args(args: &[String]) -> Vec<String> {
         "--session-name",
         "--color-scheme",
         "--download-path",
+        "--max-output",
+        "--allowed-domains",
+        "--action-policy",
+        "--confirm-actions",
         "--config",
     ];
 

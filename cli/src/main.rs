@@ -17,10 +17,108 @@ use windows_sys::Win32::Foundation::CloseHandle;
 use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
 
 use commands::{gen_id, parse_command, ParseError};
-use connection::{ensure_daemon, get_socket_dir, send_command};
+use connection::{ensure_daemon, get_socket_dir, send_command, DaemonOptions};
 use flags::{clean_args, parse_flags};
 use install::run_install;
-use output::{print_command_help, print_help, print_response, print_version};
+use output::{print_command_help, print_help, print_response_with_opts, print_version, OutputOptions};
+
+use std::path::PathBuf;
+use std::process::Command as ProcessCommand;
+
+/// Run a local auth command (auth_save/list/show/delete) via node auth-cli.js.
+/// These commands don't need a browser, so we handle them directly to avoid
+/// sending passwords through the daemon's Unix socket channel.
+fn run_auth_cli(cmd: &serde_json::Value, json_mode: bool) -> ! {
+    let exe_path = env::current_exe().unwrap_or_default();
+    let exe_path = exe_path.canonicalize().unwrap_or(exe_path);
+    let exe_dir = exe_path.parent().unwrap_or(std::path::Path::new("."));
+
+    let mut script_paths = vec![
+        exe_dir.join("auth-cli.js"),
+        exe_dir.join("../dist/auth-cli.js"),
+        PathBuf::from("dist/auth-cli.js"),
+    ];
+
+    if let Ok(home) = env::var("AGENT_BROWSER_HOME") {
+        let home_path = PathBuf::from(&home);
+        script_paths.insert(0, home_path.join("dist/auth-cli.js"));
+        script_paths.insert(1, home_path.join("auth-cli.js"));
+    }
+
+    let script_path = match script_paths.iter().find(|p| p.exists()) {
+        Some(p) => p.clone(),
+        None => {
+            if json_mode {
+                println!(r#"{{"success":false,"error":"auth-cli.js not found"}}"#);
+            } else {
+                eprintln!(
+                    "{} auth-cli.js not found. Set AGENT_BROWSER_HOME or run from project directory.",
+                    color::error_indicator()
+                );
+            }
+            exit(1);
+        }
+    };
+
+    let cmd_json = serde_json::to_string(cmd).unwrap_or_default();
+
+    match ProcessCommand::new("node")
+        .arg(&script_path)
+        .arg(&cmd_json)
+        .output()
+    {
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if !stderr.is_empty() {
+                eprint!("{}", stderr);
+            }
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stdout = stdout.trim();
+
+            if stdout.is_empty() {
+                if json_mode {
+                    println!(r#"{{"success":false,"error":"No response from auth-cli"}}"#);
+                } else {
+                    eprintln!("{} No response from auth-cli", color::error_indicator());
+                }
+                exit(1);
+            }
+
+            if json_mode {
+                println!("{}", stdout);
+            } else {
+                // Parse the JSON response and use the standard output formatter
+                match serde_json::from_str::<connection::Response>(stdout) {
+                    Ok(resp) => {
+                        let action = cmd.get("action").and_then(|v| v.as_str());
+                        let opts = OutputOptions {
+                            json: false,
+                            content_boundaries: false,
+                            max_output: None,
+                        };
+                        print_response_with_opts(&resp, action, &opts);
+                        if !resp.success {
+                            exit(1);
+                        }
+                    }
+                    Err(_) => {
+                        println!("{}", stdout);
+                    }
+                }
+            }
+            exit(output.status.code().unwrap_or(0));
+        }
+        Err(e) => {
+            if json_mode {
+                println!(r#"{{"success":false,"error":"Failed to run auth-cli: {}"}}"#, e);
+            } else {
+                eprintln!("{} Failed to run auth-cli: {}", color::error_indicator(), e);
+            }
+            exit(1);
+        }
+    }
+}
 
 fn parse_proxy(proxy_str: &str) -> serde_json::Value {
     let Some(protocol_end) = proxy_str.find("://") else {
@@ -171,7 +269,7 @@ fn main() {
         return;
     }
 
-    let cmd = match parse_command(&clean, &flags) {
+    let mut cmd = match parse_command(&clean, &flags) {
         Ok(c) => c,
         Err(e) => {
             if flags.json {
@@ -194,6 +292,38 @@ fn main() {
         }
     };
 
+    // Handle --password-stdin for auth save
+    if cmd.get("action").and_then(|v| v.as_str()) == Some("auth_save") {
+        if cmd.get("password").is_some() {
+            eprintln!(
+                "{} Passwords on the command line may be visible in process listings and shell history. Use --password-stdin instead.",
+                color::warning_indicator()
+            );
+        }
+        if cmd.get("passwordStdin").and_then(|v| v.as_bool()).unwrap_or(false) {
+            let mut pass = String::new();
+            if std::io::stdin().read_line(&mut pass).is_err() || pass.is_empty() {
+                eprintln!("{} Failed to read password from stdin", color::error_indicator());
+                exit(1);
+            }
+            let pass = pass.trim_end_matches('\n').trim_end_matches('\r');
+            if pass.is_empty() {
+                eprintln!("{} Password from stdin is empty", color::error_indicator());
+                exit(1);
+            }
+            cmd["password"] = json!(pass);
+            cmd.as_object_mut().unwrap().remove("passwordStdin");
+        }
+    }
+
+    // Handle local auth commands without starting the daemon.
+    // These don't need a browser, so we avoid sending passwords through the socket.
+    if let Some(action) = cmd.get("action").and_then(|v| v.as_str()) {
+        if matches!(action, "auth_save" | "auth_list" | "auth_show" | "auth_delete") {
+            run_auth_cli(&cmd, flags.json);
+        }
+    }
+
     // Validate session name before starting daemon
     if let Some(ref name) = flags.session_name {
         if !validation::is_valid_session_name(name) {
@@ -210,24 +340,27 @@ fn main() {
         }
     }
 
-    let daemon_result = match ensure_daemon(
-        &flags.session,
-        flags.headed,
-        flags.executable_path.as_deref(),
-        &flags.extensions,
-        flags.args.as_deref(),
-        flags.user_agent.as_deref(),
-        flags.proxy.as_deref(),
-        flags.proxy_bypass.as_deref(),
-        flags.ignore_https_errors,
-        flags.allow_file_access,
-        flags.profile.as_deref(),
-        flags.state.as_deref(),
-        flags.provider.as_deref(),
-        flags.device.as_deref(),
-        flags.session_name.as_deref(),
-        flags.download_path.as_deref(),
-    ) {
+    let daemon_opts = DaemonOptions {
+        headed: flags.headed,
+        executable_path: flags.executable_path.as_deref(),
+        extensions: &flags.extensions,
+        args: flags.args.as_deref(),
+        user_agent: flags.user_agent.as_deref(),
+        proxy: flags.proxy.as_deref(),
+        proxy_bypass: flags.proxy_bypass.as_deref(),
+        ignore_https_errors: flags.ignore_https_errors,
+        allow_file_access: flags.allow_file_access,
+        profile: flags.profile.as_deref(),
+        state: flags.state.as_deref(),
+        provider: flags.provider.as_deref(),
+        device: flags.device.as_deref(),
+        session_name: flags.session_name.as_deref(),
+        download_path: flags.download_path.as_deref(),
+        allowed_domains: flags.allowed_domains.as_deref(),
+        action_policy: flags.action_policy.as_deref(),
+        confirm_actions: flags.confirm_actions.as_deref(),
+    };
+    let daemon_result = match ensure_daemon(&flags.session, &daemon_opts) {
         Ok(result) => result,
         Err(e) => {
             if flags.json {
@@ -588,6 +721,10 @@ fn main() {
             launch_cmd["downloadPath"] = json!(dp);
         }
 
+        if let Some(ref domains) = flags.allowed_domains {
+            launch_cmd["allowedDomains"] = json!(domains);
+        }
+
         match send_command(launch_cmd, &flags.session) {
             Ok(resp) if !resp.success => {
                 // Launch command failed (e.g., invalid state file, profile error)
@@ -619,12 +756,61 @@ fn main() {
         }
     }
 
+    let output_opts = OutputOptions {
+        json: flags.json,
+        content_boundaries: flags.content_boundaries,
+        max_output: flags.max_output,
+    };
+
     match send_command(cmd.clone(), &flags.session) {
         Ok(resp) => {
             let success = resp.success;
+            // Handle interactive confirmation
+            if flags.confirm_interactive {
+                if let Some(data) = &resp.data {
+                    if data.get("confirmation_required").and_then(|v| v.as_bool()).unwrap_or(false) {
+                        let desc = data.get("description").and_then(|v| v.as_str()).unwrap_or("unknown action");
+                        let category = data.get("category").and_then(|v| v.as_str()).unwrap_or("");
+                        let cid = data.get("confirmation_id").and_then(|v| v.as_str()).unwrap_or("");
+
+                        eprintln!("[agent-browser] Action requires confirmation:");
+                        eprintln!("  {}: {}", category, desc);
+                        eprint!("  Allow? [y/N]: ");
+
+                        let mut input = String::new();
+                        let approved = if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+                            std::io::stdin().read_line(&mut input).is_ok()
+                                && matches!(input.trim().to_lowercase().as_str(), "y" | "yes")
+                        } else {
+                            false
+                        };
+
+                        let confirm_cmd = if approved {
+                            json!({ "id": gen_id(), "action": "confirm", "confirmationId": cid })
+                        } else {
+                            json!({ "id": gen_id(), "action": "deny", "confirmationId": cid })
+                        };
+
+                        match send_command(confirm_cmd, &flags.session) {
+                            Ok(r) => {
+                                if !approved {
+                                    eprintln!("{} Action denied", color::error_indicator());
+                                    exit(1);
+                                }
+                                print_response_with_opts(&r, None, &output_opts);
+                            }
+                            Err(e) => {
+                                eprintln!("{} {}", color::error_indicator(), e);
+                                exit(1);
+                            }
+                        }
+                        return;
+                    }
+                }
+            }
             // Extract action for context-specific output handling
             let action = cmd.get("action").and_then(|v| v.as_str());
-            print_response(&resp, flags.json, action);
+            print_response_with_opts(&resp, action, &output_opts);
             if !success {
                 exit(1);
             }

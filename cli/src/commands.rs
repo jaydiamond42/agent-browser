@@ -92,6 +92,7 @@ pub fn parse_command(args: &[String], flags: &Flags) -> Result<Value, ParseError
 
     match cmd {
         // === Navigation ===
+        // Maps to "navigate" action in protocol; reflected in ACTION_CATEGORIES in action-policy.ts
         "open" | "goto" | "navigate" => {
             let url = rest.first().ok_or_else(|| ParseError::MissingArguments {
                 context: cmd.to_string(),
@@ -560,6 +561,131 @@ pub fn parse_command(args: &[String], flags: &Flags) -> Result<Value, ParseError
 
         // === Close ===
         "close" | "quit" | "exit" => Ok(json!({ "id": id, "action": "close" })),
+
+        // === Authentication Vault ===
+        "auth" => {
+            let sub = rest.first().map(|s| s.as_ref());
+            match sub {
+                Some("save") => {
+                    let name = rest.get(1).ok_or_else(|| ParseError::MissingArguments {
+                        context: "auth save".to_string(),
+                        usage: "agent-browser auth save <name> --url <url> --username <user> --password <pass>",
+                    })?;
+
+                    let mut url = None;
+                    let mut username = None;
+                    let mut password = None;
+                    let mut password_stdin = false;
+                    let mut username_selector = None;
+                    let mut password_selector = None;
+                    let mut submit_selector = None;
+
+                    let mut j = 2;
+                    while j < rest.len() {
+                        match rest[j].as_ref() {
+                            "--url" => { url = rest.get(j + 1).cloned(); j += 1; }
+                            "--username" => { username = rest.get(j + 1).cloned(); j += 1; }
+                            "--password" => { password = rest.get(j + 1).cloned(); j += 1; }
+                            "--password-stdin" => { password_stdin = true; }
+                            "--username-selector" => { username_selector = rest.get(j + 1).cloned(); j += 1; }
+                            "--password-selector" => { password_selector = rest.get(j + 1).cloned(); j += 1; }
+                            "--submit-selector" => { submit_selector = rest.get(j + 1).cloned(); j += 1; }
+                            other => {
+                                if other.starts_with("--") {
+                                    return Err(ParseError::InvalidValue {
+                                        message: format!("unknown flag '{}' for auth save", other),
+                                        usage: "agent-browser auth save <name> --url <url> --username <user> --password <pass>",
+                                    });
+                                }
+                            }
+                        }
+                        j += 1;
+                    }
+
+                    let url_val = url.ok_or_else(|| ParseError::MissingArguments {
+                        context: "auth save".to_string(),
+                        usage: "agent-browser auth save <name> --url <url> --username <user> --password <pass> [--password-stdin]",
+                    })?;
+                    let user_val = username.ok_or_else(|| ParseError::MissingArguments {
+                        context: "auth save".to_string(),
+                        usage: "agent-browser auth save <name> --url <url> --username <user> --password <pass> [--password-stdin]",
+                    })?;
+
+                    if !password_stdin && password.is_none() {
+                        return Err(ParseError::MissingArguments {
+                            context: "auth save".to_string(),
+                            usage: "agent-browser auth save <name> --url <url> --username <user> --password <pass> [--password-stdin]",
+                        });
+                    }
+
+                    let mut cmd = json!({
+                        "id": id,
+                        "action": "auth_save",
+                        "name": name,
+                        "url": url_val,
+                        "username": user_val,
+                    });
+                    if password_stdin {
+                        cmd["passwordStdin"] = json!(true);
+                    }
+                    if let Some(pass_val) = password {
+                        cmd["password"] = json!(pass_val);
+                    }
+                    if let Some(us) = username_selector {
+                        cmd["usernameSelector"] = json!(us);
+                    }
+                    if let Some(ps) = password_selector {
+                        cmd["passwordSelector"] = json!(ps);
+                    }
+                    if let Some(ss) = submit_selector {
+                        cmd["submitSelector"] = json!(ss);
+                    }
+                    Ok(cmd)
+                }
+                Some("login") => {
+                    let name = rest.get(1).ok_or_else(|| ParseError::MissingArguments {
+                        context: "auth login".to_string(),
+                        usage: "agent-browser auth login <name>",
+                    })?;
+                    Ok(json!({ "id": id, "action": "auth_login", "name": name }))
+                }
+                Some("list") => Ok(json!({ "id": id, "action": "auth_list" })),
+                Some("delete") | Some("remove") => {
+                    let name = rest.get(1).ok_or_else(|| ParseError::MissingArguments {
+                        context: "auth delete".to_string(),
+                        usage: "agent-browser auth delete <name>",
+                    })?;
+                    Ok(json!({ "id": id, "action": "auth_delete", "name": name }))
+                }
+                Some("show") => {
+                    let name = rest.get(1).ok_or_else(|| ParseError::MissingArguments {
+                        context: "auth show".to_string(),
+                        usage: "agent-browser auth show <name>",
+                    })?;
+                    Ok(json!({ "id": id, "action": "auth_show", "name": name }))
+                }
+                _ => Err(ParseError::UnknownSubcommand {
+                    subcommand: sub.unwrap_or("(none)").to_string(),
+                    valid_options: &["save", "login", "list", "delete", "show"],
+                }),
+            }
+        }
+
+        // === Action Confirmation ===
+        "confirm" => {
+            let cid = rest.first().ok_or_else(|| ParseError::MissingArguments {
+                context: "confirm".to_string(),
+                usage: "agent-browser confirm <confirmation-id>",
+            })?;
+            Ok(json!({ "id": id, "action": "confirm", "confirmationId": cid }))
+        }
+        "deny" => {
+            let cid = rest.first().ok_or_else(|| ParseError::MissingArguments {
+                context: "deny".to_string(),
+                usage: "agent-browser deny <confirmation-id>",
+            })?;
+            Ok(json!({ "id": id, "action": "deny", "confirmationId": cid }))
+        }
 
         // === Connect (CDP) ===
         "connect" => {
@@ -1936,6 +2062,13 @@ mod tests {
             annotate: false,
             color_scheme: None,
             download_path: None,
+            content_boundaries: false,
+            max_output: None,
+            allowed_domains: None,
+            action_policy: None,
+            confirm_actions: None,
+            confirm_interactive: false,
+
         }
     }
 

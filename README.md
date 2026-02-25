@@ -395,6 +395,28 @@ agent-browser --session-name secure open example.com
 | `AGENT_BROWSER_ENCRYPTION_KEY` | 64-char hex key for AES-256-GCM encryption |
 | `AGENT_BROWSER_STATE_EXPIRE_DAYS` | Auto-delete states older than N days (default: 30) |
 
+## Security
+
+agent-browser includes security features for safe AI agent deployments. All features are opt-in -- existing workflows are unaffected until you explicitly enable a feature:
+
+- **Authentication Vault** -- Store credentials locally (always encrypted), reference by name. The LLM never sees passwords. A key is auto-generated at `~/.agent-browser/.encryption-key` if `AGENT_BROWSER_ENCRYPTION_KEY` is not set: `echo "pass" | agent-browser auth save github --url https://github.com/login --username user --password-stdin` then `agent-browser auth login github`
+- **Content Boundary Markers** -- Wrap page output in delimiters so LLMs can distinguish tool output from untrusted content: `--content-boundaries`
+- **Domain Allowlist** -- Restrict navigation to trusted domains (wildcards like `*.example.com` also match the bare domain): `--allowed-domains "example.com,*.example.com"`. Sub-resource requests (scripts, images, fetch) and WebSocket/EventSource connections to non-allowed domains are also blocked. Include any CDN domains your target pages depend on (e.g., `*.cdn.example.com`).
+- **Action Policy** -- Gate destructive actions with a static policy file: `--action-policy ./policy.json`
+- **Action Confirmation** -- Require explicit approval for sensitive action categories: `--confirm-actions eval,download`
+- **Output Length Limits** -- Prevent context flooding: `--max-output 50000`
+
+| Variable | Description |
+|----------|-------------|
+| `AGENT_BROWSER_CONTENT_BOUNDARIES` | Wrap page output in boundary markers |
+| `AGENT_BROWSER_MAX_OUTPUT` | Max characters for page output |
+| `AGENT_BROWSER_ALLOWED_DOMAINS` | Comma-separated allowed domain patterns |
+| `AGENT_BROWSER_ACTION_POLICY` | Path to action policy JSON file |
+| `AGENT_BROWSER_CONFIRM_ACTIONS` | Action categories requiring confirmation |
+| `AGENT_BROWSER_CONFIRM_INTERACTIVE` | Enable interactive confirmation prompts |
+
+See [Security documentation](https://agent-browser.vercel.app/security) for details.
+
 ## Snapshot Options
 
 The `snapshot` command supports filtering to reduce output size:
@@ -467,6 +489,12 @@ This is useful for multimodal AI models that can reason about visual layout, unl
 | `--auto-connect` | Auto-discover and connect to running Chrome (or `AGENT_BROWSER_AUTO_CONNECT` env) |
 | `--color-scheme <scheme>` | Color scheme: `dark`, `light`, `no-preference` (or `AGENT_BROWSER_COLOR_SCHEME` env) |
 | `--download-path <path>` | Default download directory (or `AGENT_BROWSER_DOWNLOAD_PATH` env) |
+| `--content-boundaries` | Wrap page output in boundary markers for LLM safety (or `AGENT_BROWSER_CONTENT_BOUNDARIES` env) |
+| `--max-output <chars>` | Truncate page output to N characters (or `AGENT_BROWSER_MAX_OUTPUT` env) |
+| `--allowed-domains <list>` | Comma-separated allowed domain patterns (or `AGENT_BROWSER_ALLOWED_DOMAINS` env) |
+| `--action-policy <path>` | Path to action policy JSON file (or `AGENT_BROWSER_ACTION_POLICY` env) |
+| `--confirm-actions <list>` | Action categories requiring confirmation (or `AGENT_BROWSER_CONFIRM_ACTIONS` env) |
+| `--confirm-interactive` | Interactive confirmation prompts; auto-denies if stdin is not a TTY (or `AGENT_BROWSER_CONFIRM_INTERACTIVE` env) |
 | `--config <path>` | Use a custom config file (or `AGENT_BROWSER_CONFIG` env) |
 | `--debug` | Debug output |
 
